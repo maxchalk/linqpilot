@@ -1,0 +1,12 @@
+node_modules/
+.env
+*.db
+*.db-wal
+*.db-shm
+dist/
+server_out
+server_err
+boot_out.txt 
+server_err.txt 
+server_out.txt 
+server_out2.txt 

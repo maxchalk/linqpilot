@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinqPilot – AI iMessage Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #0f172a; }
+    .flash { animation: flash 1s ease-in-out infinite; }
+    @keyframes flash { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    .msg-thread { scroll-behavior: smooth; }
+    .conv-item { border-left: 3px solid transparent; transition: background .15s; }
+    .conv-item:hover { background-color: #1e293b; }
+    .conv-item.selected { border-left-color: #3b82f6; background-color: #1e293b; }
+    .fade-in { animation: fadeIn .2s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+  </style>
+</head>
+<body class="h-screen flex overflow-hidden text-gray-100">
+
+<!-- ===================== LEFT COLUMN ===================== -->
+<aside class="flex flex-col border-r border-slate-700 bg-slate-900 flex-shrink-0" style="width:280px">
+
+  <!-- Logo -->
+  <div class="px-4 py-4 border-b border-slate-700 flex-shrink-0">
+    <div class="text-xl font-bold tracking-tight">⚡ LinqPilot</div>
+    <div class="text-xs text-slate-400 mt-0.5">AI iMessage Manager</div>
+  </div>
+
+  <!-- Conversation list -->
+  <div class="flex-1 overflow-y-auto" id="conv-list">
+    <div class="px-4 py-8 text-center text-slate-500 text-sm">No conversations yet</div>
+  </div>
+
+</aside>
+
+<!-- ===================== CENTER COLUMN ===================== -->
+<main class="flex flex-col flex-1 min-w-0 overflow-hidden">
+
+  <!-- Empty state -->
+  <div id="empty-state" class="flex-1 flex flex-col items-center justify-center text-slate-500 select-none">
+    <div class="text-5xl mb-4">💬</div>
+    <div class="text-lg font-medium text-slate-400">Select a conversation</div>
+    <div class="text-sm mt-1">Incoming iMessage threads appear on the left</div>
+  </div>
+
+  <!-- Conversation view (hidden until a conv is selected) -->
+  <div id="conv-view" class="flex flex-col flex-1 min-h-0 hidden">
+
+    <!-- Top bar -->
+    <div class="flex items-center justify-between px-5 py-3 border-b border-slate-700 bg-slate-900 flex-shrink-0">
+      <div class="flex items-center gap-3 min-w-0">
+        <div id="hdr-avatar"
+          class="w-9 h-9 rounded-full bg-blue-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
+          ??
+        </div>
+        <div class="min-w-0">
+          <div id="hdr-phone" class="font-semibold truncate">–</div>
+          <div class="flex items-center gap-1.5 flex-wrap mt-0.5">
+            <span id="hdr-status" class="text-xs px-2 py-0.5 rounded-full bg-blue-900 text-blue-300">active</span>
+            <span id="hdr-mode"   class="text-xs px-2 py-0.5 rounded-full bg-blue-900 text-blue-300">🤖 AI</span>
+            <span id="hdr-conf"   class="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 hidden"></span>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0 ml-3">
+        <button id="btn-takeover" onclick="doTakeover()"
+          class="px-3 py-1.5 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition font-medium">
+          Take Over
+        </button>
+        <button id="btn-resolve" onclick="doResolve()"
+          class="px-3 py-1.5 text-xs rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white transition font-medium">
+          Resolve
+        </button>
+      </div>
+    </div>
+
+    <!-- Message thread -->
+    <div id="msg-thread" class="flex-1 overflow-y-auto p-5 space-y-3 msg-thread"></div>
+
+    <!-- Human input bar (shown only when mode=human) -->
+    <div id="human-bar" class="hidden flex-shrink-0 border-t border-orange-900 bg-slate-900 px-4 py-3">
+      <div class="flex items-center gap-2">
+        <div class="flex-1 flex items-center bg-slate-800 border border-orange-700 focus-within:border-orange-500 rounded-xl px-4 py-2.5 transition">
+          <input id="human-input" type="text"
+            placeholder="Type as human agent…"
+            class="flex-1 bg-transparent text-white placeholder-orange-300/60 outline-none text-sm"
+            onkeydown="if(event.key==='Enter') doSendHuman()">
+        </div>
+        <button onclick="doSendHuman()"
+          class="p-2.5 bg-orange-600 hover:bg-orange-500 rounded-xl text-white transition flex-shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ===================== RIGHT COLUMN ===================== -->
+<aside class="flex flex-col border-l border-slate-700 bg-slate-900 overflow-y-auto flex-shrink-0 p-4 gap-5"
+       style="width:240px">
+
+  <!-- Analytics header -->
+  <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Analytics</h2>
+
+  <!-- Stat cards -->
+  <div class="grid grid-cols-2 gap-2">
+    <div class="bg-slate-800 rounded-xl p-3">
+      <div id="s-total" class="text-2xl font-bold text-white">0</div>
+      <div class="text-xs text-slate-400 mt-0.5">Total</div>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-3">
+      <div id="s-rate" class="text-2xl font-bold text-emerald-400">0%</div>
+      <div class="text-xs text-slate-400 mt-0.5">Resolved</div>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-3">
+      <div id="s-conf" class="text-2xl font-bold text-blue-400">–</div>
+      <div class="text-xs text-slate-400 mt-0.5">Avg Conf</div>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-3">
+      <div id="s-esc" class="text-2xl font-bold text-orange-400">0</div>
+      <div class="text-xs text-slate-400 mt-0.5">Escalated</div>
+    </div>
+  </div>
+
+  <!-- Top Topics -->
+  <div>
+    <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Top Topics</h3>
+    <div id="topics-list" class="space-y-1.5">
+      <div class="text-xs text-slate-500">No data yet</div>
+    </div>
+  </div>
+
+  <!-- Linq Feature Checklist -->
+  <div>
+    <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Linq Features</h3>
+    <div class="space-y-1.5 text-xs">
+      <div class="flex items-center gap-2 text-emerald-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+        </svg>Send Messages
+      </div>
+      <div class="flex items-center gap-2 text-emerald-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+        </svg>Typing Indicator
+      </div>
+      <div class="flex items-center gap-2 text-emerald-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+        </svg>Message Reactions
+      </div>
+      <div class="flex items-center gap-2 text-emerald-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+        </svg>Mark as Read
+      </div>
+      <div class="flex items-center gap-2 text-emerald-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+        </svg>Confetti Effect
+      </div>
+      <div class="flex items-center gap-2 text-emerald-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+        </svg>Rich Media (Images)
+      </div>
+      <div class="flex items-center gap-2 text-emerald-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+        </svg>Human Handoff
+      </div>
+    </div>
+  </div>
+
+</aside>
+
+<!-- ===================== JAVASCRIPT ===================== -->
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let convs = [];       // Array of conversation objects (with messages[])
+let selectedId = null;
+let ws = null;
+
+// ---------------------------------------------------------------------------
+// WebSocket
+// ---------------------------------------------------------------------------
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}`);
+
+  ws.onopen = () => console.log('[WS] connected');
+
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+
+    switch (msg.type) {
+      case 'init':
+        convs = msg.data || [];
+        renderList();
+        fetchAnalytics();
+        break;
+
+      case 'conversation_update': {
+        const idx = convs.findIndex(c => c.chat_id === msg.data.chat_id);
+        if (idx >= 0) convs[idx] = msg.data; else convs.unshift(msg.data);
+        convs.sort((a, b) => ts(b.last_message_at) - ts(a.last_message_at));
+        renderList();
+        if (selectedId === msg.data.chat_id) renderConv(msg.data);
+        fetchAnalytics();
+        break;
+      }
+
+      case 'mode_change': {
+        const c = convs.find(c => c.chat_id === msg.data.chatId);
+        if (c) { c.mode = msg.data.mode; c.status = msg.data.status; }
+        renderList();
+        if (selectedId === msg.data.chatId && c) renderConv(c);
+        break;
+      }
+    }
+  };
+
+  ws.onclose = () => { console.log('[WS] disconnected, reconnecting…'); setTimeout(connectWS, 2000); };
+  ws.onerror = (e) => console.error('[WS] error', e);
+}
+
+function ts(v) { return v ? new Date(v).getTime() : 0; }
+
+// ---------------------------------------------------------------------------
+// Render conversation list (left column)
+// ---------------------------------------------------------------------------
+function renderList() {
+  const el = document.getElementById('conv-list');
+  if (!convs.length) {
+    el.innerHTML = '<div class="px-4 py-8 text-center text-slate-500 text-sm">No conversations yet</div>';
+    return;
+  }
+  el.innerHTML = convs.map(renderConvItem).join('');
+}
+
+function renderConvItem(c) {
+  const sel = c.chat_id === selectedId;
+  const phone = c.phone_number || c.chat_id;
+  const initials = phone.slice(-2);
+  const preview = (c.last_message || '').substring(0, 45) + ((c.last_message || '').length > 45 ? '…' : '');
+  const timeStr = c.last_message_at ? fmtTime(c.last_message_at) : '';
+
+  const statusCls = {
+    active:           'bg-blue-900 text-blue-300',
+    resolved:         'bg-emerald-900 text-emerald-300',
+    needs_attention:  'bg-red-900 text-red-300 flash',
+  }[c.status] || 'bg-blue-900 text-blue-300';
+
+  const modeCls = c.mode === 'human'
+    ? 'bg-orange-900 text-orange-300'
+    : 'bg-blue-900 text-blue-300';
+  const modeLabel = c.mode === 'human' ? '👤 Human' : '🤖 AI';
+
+  return `
+    <div class="conv-item px-3 py-3 cursor-pointer flex items-start gap-2.5 ${sel ? 'selected' : ''}"
+         onclick="selectConv('${esc(c.chat_id)}')">
+      <div class="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">
+        ${esc(initials)}
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between gap-1 mb-1">
+          <span class="text-sm font-medium truncate">${esc(phone)}</span>
+          <span class="text-xs text-slate-500 flex-shrink-0">${timeStr}</span>
+        </div>
+        <div class="flex items-center gap-1 mb-1 flex-wrap">
+          <span class="text-xs px-1.5 py-0.5 rounded-full ${statusCls}">${c.status || 'active'}</span>
+          <span class="text-xs px-1.5 py-0.5 rounded-full ${modeCls}">${modeLabel}</span>
+        </div>
+        <div class="text-xs text-slate-400 truncate">${esc(preview)}</div>
+      </div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Select & render conversation (center column)
+// ---------------------------------------------------------------------------
+function selectConv(chatId) {
+  selectedId = chatId;
+  const c = convs.find(x => x.chat_id === chatId);
+  if (!c) return;
+  renderList(); // refresh selection highlight
+  document.getElementById('empty-state').classList.add('hidden');
+  document.getElementById('conv-view').classList.remove('hidden');
+  renderConv(c);
+}
+
+function renderConv(c) {
+  const phone = c.phone_number || c.chat_id;
+
+  // Header
+  document.getElementById('hdr-avatar').textContent = phone.slice(-2);
+  document.getElementById('hdr-phone').textContent = phone;
+
+  const statusEl = document.getElementById('hdr-status');
+  const statusCls = {
+    active:           'bg-blue-900 text-blue-300',
+    resolved:         'bg-emerald-900 text-emerald-300',
+    needs_attention:  'bg-red-900 text-red-300 flash',
+  }[c.status] || 'bg-blue-900 text-blue-300';
+  statusEl.className = `text-xs px-2 py-0.5 rounded-full ${statusCls}`;
+  statusEl.textContent = c.status || 'active';
+
+  const modeEl = document.getElementById('hdr-mode');
+  modeEl.className = `text-xs px-2 py-0.5 rounded-full ${c.mode === 'human' ? 'bg-orange-900 text-orange-300' : 'bg-blue-900 text-blue-300'}`;
+  modeEl.textContent = c.mode === 'human' ? '👤 Human' : '🤖 AI';
+
+  const confEl = document.getElementById('hdr-conf');
+  if (c.confidence > 0) {
+    confEl.classList.remove('hidden');
+    const cc = c.confidence >= 8 ? 'bg-emerald-900 text-emerald-300'
+             : c.confidence >= 6 ? 'bg-yellow-900 text-yellow-300'
+             :                     'bg-red-900 text-red-300';
+    confEl.className = `text-xs px-2 py-0.5 rounded-full ${cc}`;
+    confEl.textContent = `Confidence: ${c.confidence}/10`;
+  } else {
+    confEl.classList.add('hidden');
+  }
+
+  // Takeover button
+  const tbtn = document.getElementById('btn-takeover');
+  if (c.mode === 'human') {
+    tbtn.className = 'px-3 py-1.5 text-xs rounded-lg bg-orange-700 hover:bg-orange-600 text-white transition font-medium';
+    tbtn.textContent = '👤 In Human Mode';
+  } else {
+    tbtn.className = 'px-3 py-1.5 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition font-medium';
+    tbtn.textContent = 'Take Over';
+  }
+
+  // Human input bar
+  const bar = document.getElementById('human-bar');
+  c.mode === 'human' ? bar.classList.remove('hidden') : bar.classList.add('hidden');
+
+  // Messages
+  const thread = document.getElementById('msg-thread');
+  const msgs = c.messages || [];
+
+  if (!msgs.length) {
+    thread.innerHTML = '<div class="text-center text-slate-500 text-sm py-10">No messages yet</div>';
+    return;
+  }
+
+  const scrolledToBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
+
+  thread.innerHTML = msgs.map(renderMsg).join('');
+
+  // Auto-scroll to bottom if already near the bottom or first render
+  if (scrolledToBottom || thread.scrollTop === 0) {
+    thread.scrollTop = thread.scrollHeight;
+  }
+}
+
+function renderMsg(m) {
+  const time = m.created_at ? fmtTime(m.created_at) : '';
+  const isUser = m.sender === 'user';
+  const isAI   = m.sender === 'ai';
+
+  if (isUser) {
+    return `
+      <div class="flex justify-start fade-in">
+        <div>
+          <div class="bg-slate-700 text-white rounded-2xl rounded-tl-sm px-4 py-2.5 max-w-xs lg:max-w-md text-sm">${esc(m.content)}</div>
+          <div class="text-xs text-slate-500 mt-1 ml-1">${time}</div>
+        </div>
+      </div>`;
+  }
+
+  if (isAI) {
+    return `
+      <div class="flex justify-end fade-in">
+        <div>
+          <div class="bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-xs lg:max-w-md text-sm">
+            ${esc(m.content)}
+            ${m.confidence ? `<div class="text-xs opacity-60 mt-1">${m.confidence}/10</div>` : ''}
+          </div>
+          <div class="text-xs text-slate-500 mt-1 text-right mr-1">🤖 AI · ${time}</div>
+        </div>
+      </div>`;
+  }
+
+  // human_agent
+  return `
+    <div class="flex justify-end fade-in">
+      <div>
+        <div class="bg-orange-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-xs lg:max-w-md text-sm">${esc(m.content)}</div>
+        <div class="text-xs text-slate-500 mt-1 text-right mr-1">👤 Agent · ${time}</div>
+      </div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Analytics (right column)
+// ---------------------------------------------------------------------------
+async function fetchAnalytics() {
+  try {
+    const r = await fetch('/api/analytics');
+    const d = await r.json();
+
+    document.getElementById('s-total').textContent = d.total;
+    document.getElementById('s-rate').textContent  = `${d.resolutionRate}%`;
+    document.getElementById('s-conf').textContent  = d.avgConfidence > 0 ? String(d.avgConfidence) : '–';
+    document.getElementById('s-esc').textContent   = d.escalated;
+
+    const TOPIC_CLS = {
+      billing:   'bg-yellow-900 text-yellow-300',
+      technical: 'bg-blue-900 text-blue-300',
+      account:   'bg-purple-900 text-purple-300',
+      complaint: 'bg-red-900 text-red-300',
+      praise:    'bg-emerald-900 text-emerald-300',
+      general:   'bg-slate-700 text-slate-300',
+    };
+
+    const tl = document.getElementById('topics-list');
+    if (!d.topics.length) {
+      tl.innerHTML = '<div class="text-xs text-slate-500">No data yet</div>';
+    } else {
+      tl.innerHTML = d.topics.map(t => {
+        const cls = TOPIC_CLS[t.topic] || TOPIC_CLS.general;
+        return `<div class="flex items-center justify-between">
+          <span class="text-xs px-2 py-0.5 rounded-full ${cls}">${esc(t.topic)}</span>
+          <span class="text-xs text-slate-400">${t.count}</span>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {
+    console.error('[Analytics] fetch error', e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+async function doTakeover() {
+  if (!selectedId) return;
+  await fetch(`/api/conversations/${encodeURIComponent(selectedId)}/takeover`, { method: 'POST' });
+}
+
+async function doResolve() {
+  if (!selectedId) return;
+  await fetch(`/api/conversations/${encodeURIComponent(selectedId)}/resolve`, { method: 'POST' });
+}
+
+async function doSendHuman() {
+  if (!selectedId) return;
+  const input = document.getElementById('human-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  await fetch(`/api/conversations/${encodeURIComponent(selectedId)}/message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+function fmtTime(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
+
+function esc(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+connectWS();
+fetchAnalytics();
+</script>
+</body>
+</html>
