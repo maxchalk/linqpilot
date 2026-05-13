@@ -111,6 +111,8 @@ export function createWebhookHandler(
           if (!conv.welcomed) {
             await linqSendWelcome(chatId).catch(() => {});
             stmts.setWelcomed.run(chatId);
+            stmts.insertMsg.run(chatId, null, 'ai', '👋 Welcome! I\'m your AI support assistant. How can I help you today?', null, null);
+            broadcast({ type: 'conversation_update', data: convWithMessages(chatId) });
             return;
           }
 
